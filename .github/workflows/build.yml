@@ -47,9 +47,9 @@ jobs:
 
     - name: Fix Permissions
       run: |
-        find scripts/ -type f -name "*.sh" -exec chmod +x {} +
-        find scripts/ -type f -name "*.py" -exec chmod +x {} +
-        find tools/ -type f -name "*.sh" -exec chmod +x {} +
+        # Grant execute permissions to ALL shell and python scripts in the repo
+        find . -path ./.git -prune -o -type f -name "*.sh" -exec chmod +x {} +
+        find . -path ./.git -prune -o -type f -name "*.py" -exec chmod +x {} +
         chmod +x tools/dtc tools/mkdtimg
         chmod +x build_kernel.sh
 
