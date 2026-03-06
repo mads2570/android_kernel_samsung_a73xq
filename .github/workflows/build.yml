@@ -115,9 +115,9 @@ jobs:
         echo "obj-y += susfs.o" >> fs/Makefile
         
         # Fix unused variable warnings in task_mmu.c caused by SusFS patch
-        # The variables are inside #ifdef CONFIG_KSU_SUSFS_SUS_MAPS
-        sed -i 's/char \*out_name;/char * __maybe_unused out_name;/g' fs/proc/task_mmu.c || true
-        sed -i 's/int ret = 0;/int __maybe_unused ret = 0;/g' fs/proc/task_mmu.c || true
+        # Use very aggressive sed to handle any whitespace or formatting
+        sed -i 's/char \*out_name/char * __maybe_unused out_name/g' fs/proc/task_mmu.c || true
+        sed -i 's/int ret = 0/int __maybe_unused ret = 0/g' fs/proc/task_mmu.c || true
 
     - name: Integrate Baseband-Guard (BBG)
       run: |
@@ -125,8 +125,10 @@ jobs:
         echo 'obj-$(CONFIG_SECURITY_BBG) += Baseband-guard/baseband_guard.o' >> security/Makefile
         
         # Fix BBG missing headers error and force legacy LSM registration for 5.4 kernel
-        # Also ensure we don't try to use bbg_blob_sizes which is for newer kernels
         echo 'ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include -I$(objtree)/security/selinux -DBBG_USE_DEFINE_LSM=0' >> security/Makefile
+        
+        # Patch baseband_guard.c to wrap extern struct lsm_blob_sizes which doesn't exist in 5.4
+        sed -i 's/extern struct lsm_blob_sizes bbg_blob_sizes;/#ifdef BBG_USE_DEFINE_LSM\nextern struct lsm_blob_sizes bbg_blob_sizes;\n#endif/' security/Baseband-guard/baseband_guard.c
         
         # Add Kconfig entry for BBG if not exists
         if ! grep -q "SECURITY_BBG" security/Kconfig; then
