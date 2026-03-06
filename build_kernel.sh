@@ -52,7 +52,8 @@ make -j$JOBS -C $(pwd) O=$OUT_DIR $KERNEL_MAKE_ENV \
     CROSS_COMPILE_ARM32=$BUILD_CROSS_COMPILE_ARM32 \
     REAL_CC=$KERNEL_LLVM_BIN \
     CLANG_TRIPLE=$CLANG_TRIPLE \
-    CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+    CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
+    Image dtbs
 
 # 3. Copy Artifacts
 echo "Checking for build artifacts..."

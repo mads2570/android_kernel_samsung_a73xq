@@ -52,6 +52,14 @@ jobs:
         find tools/ -type f -name "*.sh" -exec chmod +x {} +
         chmod +x build_kernel.sh
 
+    - name: Skip Irrelevant DTBs
+      run: |
+        # Many Samsung/Qualcomm kernels fail when trying to build all generic DTBs
+        # We only need the vendor DTBs.
+        mv arch/arm64/boot/dts/allwinner arch/arm64/boot/dts/allwinner.skip || true
+        mv arch/arm64/boot/dts/amlogic arch/arm64/boot/dts/amlogic.skip || true
+        mv arch/arm64/boot/dts/broadcom arch/arm64/boot/dts/broadcom.skip || true
+
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
