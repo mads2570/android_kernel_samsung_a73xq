@@ -9,9 +9,21 @@ enum {
 	XT_CONNMARK_RESTORE,
 };
 
+enum d_shift_dir {
+	D_SHIFT_LEFT = 0,
+	D_SHIFT_RIGHT,
+};
+
 struct xt_connmark_tginfo1 {
 	__u32 ctmark, ctmask, nfmask;
 	__u8 mode;
+};
+
+struct xt_connmark_tginfo2 {
+	__u32 ctmark, ctmask, nfmask;
+	__u8 mode;
+	__u8 shift_dir;
+	__u8 shift_bits;
 };
 
 struct xt_connmark_mtinfo1 {
