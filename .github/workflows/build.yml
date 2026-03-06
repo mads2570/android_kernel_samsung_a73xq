@@ -56,11 +56,24 @@ jobs:
     - name: Fix Symlinks
       run: |
         # Recreate essential symlinks for DTS compilation
+        # Qualcomm kernels often expect a complex nested structure
         cd scripts/dtc/include-prefixes
-        rm -f dt-bindings arm64 arm
+        rm -rf dt-bindings arm64 arm
         ln -s ../../../include/dt-bindings dt-bindings
         ln -s ../../../arch/arm64/boot/dts arm64
         ln -s ../../../arch/arm/boot/dts arm
+        
+        # Additional symlinks for common Qualcomm patterns
+        mkdir -p arm
+        cd arm
+        ln -s ../../../../arch/arm/boot/dts msm || true
+        cd ..
+        
+        mkdir -p arm64
+        cd arm64
+        ln -s ../../../../arch/arm64/boot/dts/vendor qcom || true
+        cd ..
+        
         cd ../../../
 
     - name: Run Build Script
