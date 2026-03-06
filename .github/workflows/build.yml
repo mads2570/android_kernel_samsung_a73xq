@@ -86,41 +86,56 @@ jobs:
     - name: Integrate ReSukiSU
       run: |
         git clone https://github.com/ReSukiSU/ReSukiSU.git drivers/ReSukiSU
-        echo 'obj-y += ReSukiSU/' >> drivers/Makefile
-        echo 'source "drivers/ReSukiSU/Kconfig"' >> drivers/Kconfig
+        # Check if Kconfig exists
+        ls -l drivers/ReSukiSU/Kconfig
+        # Add to Makefile if not already there
+        grep -q "ReSukiSU" drivers/Makefile || echo 'obj-y += ReSukiSU/' >> drivers/Makefile
+        # Add to Kconfig before the last endmenu
+        sed -i '/endmenu/i source "drivers/ReSukiSU/Kconfig"' drivers/Kconfig
 
     - name: Integrate SusFS
       run: |
         git clone https://gitlab.com/simonpunk/susfs4ksu.git
         # Apply SusFS patches
-        # For Kernel 5.4, we use the specific patch from the repo
         cp susfs4ksu/kernel_patches/fs/susfs.c fs/
         cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-        patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch || true
+        
+        # Apply the kernel patch. We use || true because some parts might already be patched or slightly differ
+        patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch || echo "Patch applied with some offsets/fails"
         
         # Patch ReSukiSU for SusFS support
         cd drivers/ReSukiSU
-        patch -p1 < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+        patch -p1 < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || echo "KSU SusFS patch failed"
         cd ../../
+        
+        # Ensure SusFS is built
+        echo "obj-y += susfs.o" >> fs/Makefile
 
     - name: Integrate Baseband-Guard (BBG)
       run: |
         curl -LSs https://raw.githubusercontent.com/vc-teahouse/Baseband-guard/master/baseband_guard.c -o security/baseband_guard.c
         echo 'obj-$(CONFIG_SECURITY_BBG) += baseband_guard.o' >> security/Makefile
-        # Add Kconfig entry for BBG
-        sed -i '/menu "Security options"/a config SECURITY_BBG\n\tbool "Baseband-Guard Support"\n\tdefault y\n\thelp\n\t  Protect critical partitions from unauthorized writes.' security/Kconfig
+        # Add Kconfig entry for BBG if not exists
+        if ! grep -q "SECURITY_BBG" security/Kconfig; then
+          sed -i '/menu "Security options"/a config SECURITY_BBG\n\tbool "Baseband-Guard Support"\n\tdefault y\n\thelp\n\t  Protect critical partitions from unauthorized writes.' security/Kconfig
+        fi
 
     - name: Configure Defconfig
       run: |
         DEFCONFIG="arch/arm64/configs/vendor/a73xq_eur_open_defconfig"
+        # ReSukiSU
         echo "CONFIG_KSU=y" >> $DEFCONFIG
+        # SusFS
         echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG
+        echo "CONFIG_SUSFS=y" >> $DEFCONFIG
         echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> $DEFCONFIG
         echo "CONFIG_KSU_SUSFS_SUSP_PATH=y" >> $DEFCONFIG
         echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> $DEFCONFIG
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUSP_PATH=y" >> $DEFCONFIG
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT=y" >> $DEFCONFIG
+        # BBG
         echo "CONFIG_SECURITY_BBG=y" >> $DEFCONFIG
+        # TCP BBR
         echo "CONFIG_TCP_CONG_BBR=y" >> $DEFCONFIG
         echo "CONFIG_DEFAULT_TCP_CONG=\"bbr\"" >> $DEFCONFIG
 
