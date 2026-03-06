@@ -76,6 +76,50 @@ jobs:
         
         cd ../../../
 
+    - name: Fix Case-Sensitive Headers
+      run: |
+        # Create missing lowercase headers that are expected by some modules
+        # This is a workaround for Windows-hosted development environments
+        NF_DIR="include/uapi/linux/netfilter"
+        
+        cat <<EOF > ${NF_DIR}/xt_mark.h
+        #ifndef _XT_MARK_H
+        #define _XT_MARK_H
+        #include <linux/types.h>
+        struct xt_mark_tginfo2 { __u32 mark, mask; };
+        struct xt_mark_mtinfo1 { __u32 mark, mask; __u8 invert; };
+        #endif
+        EOF
+        
+        cat <<EOF > ${NF_DIR}/xt_connmark.h
+        #ifndef _XT_CONNMARK_H
+        #define _XT_CONNMARK_H
+        #include <linux/types.h>
+        enum { XT_CONNMARK_SET = 0, XT_CONNMARK_SAVE, XT_CONNMARK_RESTORE, };
+        struct xt_connmark_tginfo1 { __u32 ctmark, ctmask, nfmask; __u8 mode; };
+        struct xt_connmark_mtinfo1 { __u32 mark, mask; __u8 invert; };
+        #endif
+        EOF
+        
+        cat <<EOF > ${NF_DIR}/xt_dscp.h
+        #ifndef _XT_DSCP_H
+        #define _XT_DSCP_H
+        #include <linux/types.h>
+        #define XT_DSCP_MASK 0xfc
+        #define XT_DSCP_SHIFT 2
+        struct xt_dscp_info { __u8 dscp; __u8 invert; };
+        #endif
+        EOF
+        
+        cat <<EOF > ${NF_DIR}/xt_idletimer.h
+        #ifndef _XT_IDLETIMER_H
+        #define _XT_IDLETIMER_H
+        #include <linux/types.h>
+        struct idletimer_tg_info { __u32 timeout; char label[32]; struct idletimer_tg *timer __attribute__((aligned(8))); };
+        struct idletimer_tg_info_v1 { __u32 timeout; char label[32]; __u8 send_nl_msg; struct idletimer_tg *timer __attribute__((aligned(8))); };
+        #endif
+        EOF
+
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
