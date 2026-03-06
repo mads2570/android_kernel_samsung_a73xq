@@ -86,21 +86,10 @@ jobs:
     - name: Integrate ReSukiSU
       run: |
         git clone https://github.com/ReSukiSU/ReSukiSU.git drivers/ReSukiSU
-        # Debug the structure
-        echo "ReSukiSU content:"
-        ls -R drivers/ReSukiSU
-        
-        # Determine correct path (handling possible 'kernel' subfolder)
-        KSU_PATH="drivers/ReSukiSU"
-        if [ -d "drivers/ReSukiSU/kernel" ]; then
-          KSU_PATH="drivers/ReSukiSU/kernel"
-        fi
-        
         # Add to Makefile if not already there
         grep -q "ReSukiSU" drivers/Makefile || echo "obj-y += ReSukiSU/" >> drivers/Makefile
         
-        # Add to Kconfig before the last endmenu
-        # We search for the actual Kconfig in the cloned repo
+        # Find the actual Kconfig
         ACTUAL_KCONFIG=$(find drivers/ReSukiSU -name "Kconfig" | head -n 1)
         if [ -n "$ACTUAL_KCONFIG" ]; then
           sed -i "/endmenu/i source \"$ACTUAL_KCONFIG\"" drivers/Kconfig
@@ -115,8 +104,6 @@ jobs:
         # Apply SusFS patches
         cp susfs4ksu/kernel_patches/fs/susfs.c fs/
         cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-        
-        # Apply the kernel patch. We use || true because some parts might already be patched or slightly differ
         patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch || echo "Patch applied with some offsets/fails"
         
         # Patch ReSukiSU for SusFS support
@@ -126,11 +113,14 @@ jobs:
         
         # Ensure SusFS is built
         echo "obj-y += susfs.o" >> fs/Makefile
+        
+        # Fix unused variable warning in task_mmu.c caused by SusFS patch
+        sed -i 's/const char \*out_name/const char * __maybe_unused out_name/g' fs/proc/task_mmu.c || true
 
     - name: Integrate Baseband-Guard (BBG)
       run: |
-        curl -LSs https://raw.githubusercontent.com/vc-teahouse/Baseband-guard/master/baseband_guard.c -o security/baseband_guard.c
-        echo 'obj-$(CONFIG_SECURITY_BBG) += baseband_guard.o' >> security/Makefile
+        git clone https://github.com/vc-teahouse/Baseband-guard.git security/Baseband-guard
+        echo 'obj-$(CONFIG_SECURITY_BBG) += Baseband-guard/baseband_guard.o' >> security/Makefile
         # Add Kconfig entry for BBG if not exists
         if ! grep -q "SECURITY_BBG" security/Kconfig; then
           sed -i '/menu "Security options"/a config SECURITY_BBG\n\tbool "Baseband-Guard Support"\n\tdefault y\n\thelp\n\t  Protect critical partitions from unauthorized writes.' security/Kconfig
