@@ -115,18 +115,18 @@ jobs:
         echo "obj-y += susfs.o" >> fs/Makefile
         
         # Fix unused variable warnings in task_mmu.c caused by SusFS patch
-        # Use more robust sed patterns to ensure we catch the declarations
-        sed -i 's/const char \*out_name;/const char * __maybe_unused out_name;/g' fs/proc/task_mmu.c || true
-        sed -i 's/int ret;/int __maybe_unused ret;/g' fs/proc/task_mmu.c || true
+        # Use very loose sed patterns to catch any variation of these declarations
+        sed -i 's/const char \*out_name/const char * __maybe_unused out_name/g' fs/proc/task_mmu.c || true
+        sed -i 's/int ret/int __maybe_unused ret/g' fs/proc/task_mmu.c || true
 
     - name: Integrate Baseband-Guard (BBG)
       run: |
         git clone https://github.com/vc-teahouse/Baseband-guard.git security/Baseband-guard
         echo 'obj-$(CONFIG_SECURITY_BBG) += Baseband-guard/baseband_guard.o' >> security/Makefile
         
-        # Fix BBG missing headers error by adding all necessary selinux include paths
-        # We include both source tree and object tree (for generated flask.h)
-        echo 'ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include -I$(obj)/../selinux' >> security/Makefile
+        # Fix BBG missing headers error
+        # We need to point to where flask.h is generated. In out-of-tree build, it is in $(objtree)/security/selinux
+        echo 'ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include -I$(objtree)/security/selinux' >> security/Makefile
         
         # Add Kconfig entry for BBG if not exists
         if ! grep -q "SECURITY_BBG" security/Kconfig; then
