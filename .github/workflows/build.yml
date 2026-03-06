@@ -114,13 +114,18 @@ jobs:
         # Ensure SusFS is built
         echo "obj-y += susfs.o" >> fs/Makefile
         
-        # Fix unused variable warning in task_mmu.c caused by SusFS patch
+        # Fix unused variable warnings in task_mmu.c caused by SusFS patch
+        # These are treated as errors due to -Werror (or similar)
         sed -i 's/const char \*out_name/const char * __maybe_unused out_name/g' fs/proc/task_mmu.c || true
+        sed -i 's/int ret;/int __maybe_unused ret;/g' fs/proc/task_mmu.c || true
 
     - name: Integrate Baseband-Guard (BBG)
       run: |
         git clone https://github.com/vc-teahouse/Baseband-guard.git security/Baseband-guard
         echo 'obj-$(CONFIG_SECURITY_BBG) += Baseband-guard/baseband_guard.o' >> security/Makefile
+        # Fix BBG missing objsec.h error by adding selinux include path
+        echo 'ccflags-y += -I$(srctree)/security/selinux/include' >> security/Makefile
+        
         # Add Kconfig entry for BBG if not exists
         if ! grep -q "SECURITY_BBG" security/Kconfig; then
           sed -i '/menu "Security options"/a config SECURITY_BBG\n\tbool "Baseband-Guard Support"\n\tdefault y\n\thelp\n\t  Protect critical partitions from unauthorized writes.' security/Kconfig
