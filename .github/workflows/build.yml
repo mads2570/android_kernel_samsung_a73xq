@@ -44,7 +44,7 @@ jobs:
     - name: Prepare Artifacts
       run: |
         mkdir -p build_output
-        mv Image build_output/
+        find . -maxdepth 1 -name "Image*" -exec mv {} build_output/ \;
         find . -maxdepth 1 -name "*.dtbo" -exec mv {} build_output/ \;
         cd build_output
         zip -r ../kernel-a73xq.zip *

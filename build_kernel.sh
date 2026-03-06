@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # Environment Setup
 export ARCH=arm64
@@ -28,7 +29,7 @@ echo "Clang: $KERNEL_LLVM_BIN"
 echo "GCC: $BUILD_CROSS_COMPILE"
 echo "----------------------------------------------"
 
-# Create toolchain dir if it doesn't exist (handled by GitHub Action usually)
+# Create toolchain dir if it doesn't exist
 mkdir -p $TOOLCHAIN_DIR
 
 # 1. Configure
@@ -49,8 +50,16 @@ make -j$JOBS -C $(pwd) O=$OUT_DIR $KERNEL_MAKE_ENV \
     CONFIG_SECTION_MISMATCH_WARN_ONLY=y
 
 # 3. Copy Artifacts
-cp $OUT_DIR/arch/arm64/boot/Image $(pwd)/Image
-# Also copy DTBOs if needed
+echo "Checking for build artifacts..."
+# Search for Image or Image.gz/lz4/etc
+find $OUT_DIR/arch/arm64/boot/ -maxdepth 1 -name "Image*" -exec cp {} . \;
+
+# Search for DTBOs
 find $OUT_DIR/arch/arm64/boot/dts/vendor/qcom/ -name "*.dtbo" -exec cp {} . \;
 
-echo "Build Completed Successfully!"
+if [ -f "Image" ] || [ -f "Image.gz" ]; then
+    echo "Build Completed Successfully!"
+else
+    echo "Error: Kernel Image not found in output directory."
+    exit 1
+fi
