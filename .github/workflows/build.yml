@@ -86,12 +86,28 @@ jobs:
     - name: Integrate ReSukiSU
       run: |
         git clone https://github.com/ReSukiSU/ReSukiSU.git drivers/ReSukiSU
-        # Check if Kconfig exists
-        ls -l drivers/ReSukiSU/Kconfig
+        # Debug the structure
+        echo "ReSukiSU content:"
+        ls -R drivers/ReSukiSU
+        
+        # Determine correct path (handling possible 'kernel' subfolder)
+        KSU_PATH="drivers/ReSukiSU"
+        if [ -d "drivers/ReSukiSU/kernel" ]; then
+          KSU_PATH="drivers/ReSukiSU/kernel"
+        fi
+        
         # Add to Makefile if not already there
-        grep -q "ReSukiSU" drivers/Makefile || echo 'obj-y += ReSukiSU/' >> drivers/Makefile
+        grep -q "ReSukiSU" drivers/Makefile || echo "obj-y += ReSukiSU/" >> drivers/Makefile
+        
         # Add to Kconfig before the last endmenu
-        sed -i '/endmenu/i source "drivers/ReSukiSU/Kconfig"' drivers/Kconfig
+        # We search for the actual Kconfig in the cloned repo
+        ACTUAL_KCONFIG=$(find drivers/ReSukiSU -name "Kconfig" | head -n 1)
+        if [ -n "$ACTUAL_KCONFIG" ]; then
+          sed -i "/endmenu/i source \"$ACTUAL_KCONFIG\"" drivers/Kconfig
+        else
+          echo "Error: ReSukiSU Kconfig not found"
+          exit 1
+        fi
 
     - name: Integrate SusFS
       run: |
