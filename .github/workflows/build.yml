@@ -52,6 +52,16 @@ jobs:
         find tools/ -type f -name "*.sh" -exec chmod +x {} +
         chmod +x build_kernel.sh
 
+    - name: Fix Symlinks
+      run: |
+        # Recreate essential symlinks for DTS compilation
+        cd scripts/dtc/include-prefixes
+        rm -f dt-bindings arm64 arm
+        ln -s ../../../include/dt-bindings dt-bindings
+        ln -s ../../../arch/arm64/boot/dts arm64
+        ln -s ../../../arch/arm/boot/dts arm
+        cd ../../../
+
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
