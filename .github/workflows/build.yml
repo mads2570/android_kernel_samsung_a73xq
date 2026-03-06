@@ -45,6 +45,13 @@ jobs:
         echo "Checking GCC32 bin:"
         ls -F toolchain/gcc32/bin/ | head -n 10
 
+    - name: Fix Permissions
+      run: |
+        find scripts/ -type f -name "*.sh" -exec chmod +x {} +
+        find scripts/ -type f -name "*.py" -exec chmod +x {} +
+        find tools/ -type f -name "*.sh" -exec chmod +x {} +
+        chmod +x build_kernel.sh
+
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
