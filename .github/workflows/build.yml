@@ -1,0 +1,56 @@
+name: Build Samsung A73xq Kernel
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Source
+      uses: actions/checkout@v4
+
+    - name: Set up Build Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential curl flex git libssl-dev make python3 zip zstd libelf-dev libarchive-tools libarchive-dev
+
+    - name: Download Toolchains
+      run: |
+        mkdir -p toolchain/clang toolchain/gcc64
+        
+        # Download Clang 11.0.2 (matching defconfig r383902b1)
+        # Using a pre-packaged version to save time and bandwidth
+        curl -LSs https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-11.0.0_r48/clang-r383902b.tar.gz -o clang.tar.gz
+        tar -C toolchain/clang -xzf clang.tar.gz
+        
+        # Download AOSP GCC 4.9 (for aarch64)
+        curl -LSs https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz -o gcc64.tar.gz
+        tar -C toolchain/gcc64 -xzf gcc64.tar.gz
+
+    - name: Run Build Script
+      run: |
+        chmod +x build_kernel.sh
+        ./build_kernel.sh
+      env:
+        GCC64_DIR: ${{ github.workspace }}/toolchain/gcc64
+        CLANG_DIR: ${{ github.workspace }}/toolchain/clang
+
+    - name: Prepare Artifacts
+      run: |
+        mkdir -p build_output
+        mv Image build_output/
+        find . -maxdepth 1 -name "*.dtbo" -exec mv {} build_output/ \;
+        cd build_output
+        zip -r ../kernel-a73xq.zip *
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-a73xq
+        path: kernel-a73xq.zip
