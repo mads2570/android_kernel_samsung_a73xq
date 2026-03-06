@@ -115,18 +115,18 @@ jobs:
         echo "obj-y += susfs.o" >> fs/Makefile
         
         # Fix unused variable warnings in task_mmu.c caused by SusFS patch
-        # Use very loose sed patterns to catch any variation of these declarations
-        sed -i 's/const char \*out_name/const char * __maybe_unused out_name/g' fs/proc/task_mmu.c || true
-        sed -i 's/int ret/int __maybe_unused ret/g' fs/proc/task_mmu.c || true
+        # The variables are inside #ifdef CONFIG_KSU_SUSFS_SUS_MAPS
+        sed -i 's/char \*out_name;/char * __maybe_unused out_name;/g' fs/proc/task_mmu.c || true
+        sed -i 's/int ret = 0;/int __maybe_unused ret = 0;/g' fs/proc/task_mmu.c || true
 
     - name: Integrate Baseband-Guard (BBG)
       run: |
         git clone https://github.com/vc-teahouse/Baseband-guard.git security/Baseband-guard
         echo 'obj-$(CONFIG_SECURITY_BBG) += Baseband-guard/baseband_guard.o' >> security/Makefile
         
-        # Fix BBG missing headers error
-        # We need to point to where flask.h is generated. In out-of-tree build, it is in $(objtree)/security/selinux
-        echo 'ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include -I$(objtree)/security/selinux' >> security/Makefile
+        # Fix BBG missing headers error and force legacy LSM registration for 5.4 kernel
+        # Also ensure we don't try to use bbg_blob_sizes which is for newer kernels
+        echo 'ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include -I$(objtree)/security/selinux -DBBG_USE_DEFINE_LSM=0' >> security/Makefile
         
         # Add Kconfig entry for BBG if not exists
         if ! grep -q "SECURITY_BBG" security/Kconfig; then
