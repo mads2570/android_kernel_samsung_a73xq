@@ -22,23 +22,37 @@ jobs:
 
     - name: Download Toolchains
       run: |
-        mkdir -p toolchain/clang toolchain/gcc64
+        mkdir -p toolchain/clang toolchain/gcc64 toolchain/gcc32
         
-        # Download Clang 11.0.2 (matching defconfig r383902b1)
-        # Using a pre-packaged version to save time and bandwidth
+        # Download Clang 11.0.2
         curl -LSs https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-11.0.0_r48/clang-r383902b.tar.gz -o clang.tar.gz
         tar -C toolchain/clang -xzf clang.tar.gz
         
         # Download AOSP GCC 4.9 (for aarch64)
-        curl -LSs https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz -o gcc64.tar.gz
+        curl -LSs https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-11.0.0_r48.tar.gz -o gcc64.tar.gz
         tar -C toolchain/gcc64 -xzf gcc64.tar.gz
+        
+        # Download AOSP GCC 4.9 (for arm)
+        curl -LSs https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-11.0.0_r48.tar.gz -o gcc32.tar.gz
+        tar -C toolchain/gcc32 -xzf gcc32.tar.gz
+
+    - name: Debug Toolchain Paths
+      run: |
+        echo "Checking Clang bin:"
+        ls -F toolchain/clang/bin/ | head -n 10
+        echo "Checking GCC64 bin:"
+        ls -F toolchain/gcc64/bin/ | head -n 10
+        echo "Checking GCC32 bin:"
+        ls -F toolchain/gcc32/bin/ | head -n 10
 
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
+        export PATH="${{ github.workspace }}/toolchain/clang/bin:${{ github.workspace }}/toolchain/gcc64/bin:${{ github.workspace }}/toolchain/gcc32/bin:$PATH"
         ./build_kernel.sh
       env:
         GCC64_DIR: ${{ github.workspace }}/toolchain/gcc64
+        GCC32_DIR: ${{ github.workspace }}/toolchain/gcc32
         CLANG_DIR: ${{ github.workspace }}/toolchain/clang
 
     - name: Prepare Artifacts
