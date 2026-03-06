@@ -50,6 +50,7 @@ jobs:
         find scripts/ -type f -name "*.sh" -exec chmod +x {} +
         find scripts/ -type f -name "*.py" -exec chmod +x {} +
         find tools/ -type f -name "*.sh" -exec chmod +x {} +
+        chmod +x tools/dtc tools/mkdtimg
         chmod +x build_kernel.sh
 
     - name: Fix Symlinks
