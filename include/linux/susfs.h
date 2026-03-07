@@ -1,3 +1,10 @@
+struct filename;
+struct path;
+struct vfsmount;
+struct stat;
+struct vm_area_struct;
+struct new_utsname;
+struct mnt_namespace;
 #ifndef KSU_SUSFS_H
 #define KSU_SUSFS_H
 
