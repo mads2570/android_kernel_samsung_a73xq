@@ -118,6 +118,11 @@ jobs:
         # Use very aggressive sed to handle any whitespace or formatting
         sed -i 's/char \*out_name/char * __maybe_unused out_name/g' fs/proc/task_mmu.c || true
         sed -i 's/int ret = 0/int __maybe_unused ret = 0/g' fs/proc/task_mmu.c || true
+        
+        # Fix C90 mixing declarations and code in base.c caused by SusFS patch
+        # and unused variable 'info'
+        sed -i 's/int susfs_ret = 0/int __maybe_unused susfs_ret = 0/g' fs/proc/base.c || true
+        sed -i 's/struct map_files_info info/struct map_files_info __maybe_unused info/g' fs/proc/base.c || true
 
     - name: Integrate Baseband-Guard (BBG)
       run: |
