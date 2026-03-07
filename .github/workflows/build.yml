@@ -74,113 +74,6 @@ jobs:
         
         cd ../../../
 
-    - name: Integrate KernelSU Next
-      run: |
-        curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-        
-        # Patch KernelSU Next for 5.4 kernel compatibility
-        # 1. TWA_RESUME is not defined in 5.4, use true (notify)
-        # 2. Add missing header for put_task_struct
-        # 3. filter_count is not in struct seccomp in 5.4 (added in 5.9)
-        find KernelSU-Next/kernel/ -name "*.c" -exec sed -i 's/\bTWA_RESUME\b/true/g' {} +
-        find KernelSU-Next/kernel/ -name "*.h" -exec sed -i 's/\bTWA_RESUME\b/true/g' {} +
-        sed -i '1i #include <linux/sched/task.h>' KernelSU-Next/kernel/allowlist.c
-        
-        # Wrap filter_count in version check
-        sed -i 's/atomic_set(&current->seccomp.filter_count, 0);/#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)\n    atomic_set(\&current->seccomp.filter_count, 0);\n#endif/' KernelSU-Next/kernel/app_profile.c
-
-    - name: Integrate SusFS
-      run: |
-        git clone https://gitlab.com/simonpunk/susfs4ksu.git
-        # Apply SusFS patches to kernel
-        cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-        cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-        patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch || echo "Kernel SusFS patch applied with offsets"
-        
-        # Manual Fix for task_mmu.c Hunk #3
-        # We use a temp script to avoid complex escaping in YAML
-        cat <<'EOF' > fix_task_mmu.py
-        import os
-        path = 'fs/proc/task_mmu.c'
-        with open(path, 'r') as f:
-            lines = f.readlines()
-        
-        new_lines = []
-        for line in lines:
-            new_lines.append(line)
-            if 'end = vma->vm_end;' in line:
-                new_lines.append('\n#ifdef CONFIG_KSU_SUSFS_SUS_MAPS\n')
-                new_lines.append('\tout_name = kmalloc(SUSFS_MAX_LEN_PATHNAME, GFP_KERNEL);\n')
-                new_lines.append('\tif (!out_name)\n')
-                new_lines.append('\t\tgoto orig_flow;\n')
-                new_lines.append('\tret = susfs_sus_maps(ino, end - start, &ino, &dev, &flags, &pgoff, vma, out_name);\n')
-                new_lines.append('orig_flow:\n')
-                new_lines.append('#endif\n')
-        
-        # Part 2: Insert before if (file)
-        final_lines = []
-        for line in new_lines:
-            if 'if (file) {' in line and '#ifdef CONFIG_KSU_SUSFS_SUS_MAPS' not in "".join(final_lines[-10:]):
-                final_lines.append('#ifdef CONFIG_KSU_SUSFS_SUS_MAPS\n')
-                final_lines.append('\tif (ret == 2) {\n')
-                final_lines.append('\t\tseq_pad(m, " ");\n')
-                final_lines.append('\t\tseq_puts(m, out_name);\n')
-                final_lines.append('\t\tseq_putc(m, \'\\n\');\n')
-                final_lines.append('\t\tkfree(out_name);\n')
-                final_lines.append('\t\treturn;\n')
-                final_lines.append('\t}\n')
-                final_lines.append('\tkfree(out_name);\n')
-                final_lines.append('#endif\n')
-            final_lines.append(line)
-            
-        with open(path, 'w') as f:
-            f.writelines(final_lines)
-        EOF
-        python3 fix_task_mmu.py
-
-        # Manual Patching of KernelSU Next for SusFS support
-        KSU_DIR="KernelSU-Next/kernel"
-        
-        # 1. Update Kconfig
-        sed -i '/config KSU_DEBUG/a config KSU_SUSFS\n    bool "KernelSU addon - SUSFS"\n    depends on KSU\n    default y\nconfig KSU_SUSFS_SUS_PATH\n    bool "Enable to hide suspicious path"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SUS_MOUNT\n    bool "Enable to hide suspicious mounts"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SUS_KSTAT\n    bool "Enable to spoof suspicious kstat"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SUS_MAPS\n    bool "Enable to spoof suspicious maps"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_TRY_UMOUNT\n    bool "Enable to use ksu's try_umount"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SPOOF_UNAME\n    bool "Enable to spoof uname"\n    depends on KSU_SUSFS\n    default y' ${KSU_DIR}/Kconfig
-
-        # 2. Update Makefile
-        echo 'ifeq ($(shell test -e $(srctree)/fs/susfs.c; echo $$?),0)' >> ${KSU_DIR}/Makefile
-        echo 'ccflags-y += -DKSU_SUSFS' >> ${KSU_DIR}/Makefile
-        echo 'endif' >> ${KSU_DIR}/Makefile
-
-        # 3. Update ksu.c
-        sed -i '1i #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' ${KSU_DIR}/ksu.c
-        sed -i '/prepare_creds/i #ifdef CONFIG_KSU_SUSFS\n\tsusfs_init();\n#endif' ${KSU_DIR}/ksu.c
-
-        # 4. Update selinux/rules.c
-        sed -i '/mutex_unlock(&ksu_rules);/i #ifdef CONFIG_KSU_SUSFS\n\tksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");\n#endif' ${KSU_DIR}/selinux/rules.c
-
-        # 5. Update supercalls.c
-        sed -i '1i #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' ${KSU_DIR}/supercalls.c
-        sed -i '/int ksu_handle_sys_reboot/a #ifdef CONFIG_KSU_SUSFS\n    if (magic2 == 0x53555346) return 0;\n#endif' ${KSU_DIR}/supercalls.c
-
-        # 6. Ensure SusFS is built
-        grep -q "susfs.o" fs/Makefile || echo "obj-y += susfs.o" >> fs/Makefile
-        
-        # 7. Fix variable warnings
-        sed -i 's/char \*out_name/char * __maybe_unused out_name/g' fs/proc/task_mmu.c || true
-        sed -i 's/int ret = 0/int __maybe_unused ret = 0/g' fs/proc/task_mmu.c || true
-        sed -i 's/int susfs_ret = 0/int __maybe_unused susfs_ret = 0/g' fs/proc/base.c || true
-        sed -i 's/struct map_files_info info/struct map_files_info __maybe_unused info/g' fs/proc/base.c || true
-
-    - name: Configure Defconfig
-      run: |
-        DEFCONFIG="arch/arm64/configs/vendor/a73xq_eur_open_defconfig"
-        echo "CONFIG_KSU=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG
-        echo "CONFIG_SUSFS=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS_SUSP_PATH=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUSP_PATH=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT=y" >> $DEFCONFIG
-
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
@@ -193,11 +86,6 @@ jobs:
 
     - name: Pack boot.img
       run: |
-        # This step requires a base boot.img to be placed in the root or downloaded
-        # If you have a URL for the base boot.img, uncomment and set it below:
-        # BASE_BOOT_URL="https://example.com/path/to/stock_boot.img"
-        # curl -LSs "$BASE_BOOT_URL" -o stock_boot.img
-        
         if [ -f "stock_boot.img" ]; then
           mkdir -p boot_pack
           git clone https://github.com/mizunashi/magiskboot-bin.git boot_pack/magiskboot
@@ -214,7 +102,7 @@ jobs:
           $MB repack stock_boot.img patched_boot.img
           echo "boot.img packed successfully."
         else
-          echo "No stock_boot.img found. Skipping boot.img packing. Please provide stock_boot.img in the repo root if you want this to work."
+          echo "No stock_boot.img found. Skipping boot.img packing."
         fi
 
     - name: Package with AnyKernel3
