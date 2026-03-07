@@ -74,6 +74,44 @@ jobs:
         
         cd ../../../
 
+    - name: Integrate KernelSU Next
+      run: |
+        curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+        
+    - name: Integrate SusFS
+      run: |
+        git clone https://gitlab.com/simonpunk/susfs4ksu.git
+        # Apply SusFS patches to kernel
+        cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+        cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+        patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch || echo "Kernel SusFS patch applied with offsets"
+        
+        # Patch KernelSU Next for SusFS support
+        cd drivers/kernelsu
+        patch -p1 < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || echo "KSU SusFS patch failed"
+        cd ../../
+        
+        # Ensure SusFS is built
+        grep -q "susfs.o" fs/Makefile || echo "obj-y += susfs.o" >> fs/Makefile
+        
+        # Fix unused variable warnings in task_mmu.c/base.c (from previous fixes)
+        sed -i 's/char \*out_name/char * __maybe_unused out_name/g' fs/proc/task_mmu.c || true
+        sed -i 's/int ret = 0/int __maybe_unused ret = 0/g' fs/proc/task_mmu.c || true
+        sed -i 's/int susfs_ret = 0/int __maybe_unused susfs_ret = 0/g' fs/proc/base.c || true
+        sed -i 's/struct map_files_info info/struct map_files_info __maybe_unused info/g' fs/proc/base.c || true
+
+    - name: Configure Defconfig
+      run: |
+        DEFCONFIG="arch/arm64/configs/vendor/a73xq_eur_open_defconfig"
+        echo "CONFIG_KSU=y" >> $DEFCONFIG
+        echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG
+        echo "CONFIG_SUSFS=y" >> $DEFCONFIG
+        echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> $DEFCONFIG
+        echo "CONFIG_KSU_SUSFS_SUSP_PATH=y" >> $DEFCONFIG
+        echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> $DEFCONFIG
+        echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUSP_PATH=y" >> $DEFCONFIG
+        echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT=y" >> $DEFCONFIG
+
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
@@ -84,30 +122,51 @@ jobs:
         GCC32_DIR: ${{ github.workspace }}/toolchain/gcc32
         CLANG_DIR: ${{ github.workspace }}/toolchain/clang
 
+    - name: Pack boot.img
+      run: |
+        # This step requires a base boot.img to be placed in the root or downloaded
+        # If you have a URL for the base boot.img, uncomment and set it below:
+        # BASE_BOOT_URL="https://example.com/path/to/stock_boot.img"
+        # curl -LSs "$BASE_BOOT_URL" -o stock_boot.img
+        
+        if [ -f "stock_boot.img" ]; then
+          mkdir -p boot_pack
+          git clone https://github.com/mizunashi/magiskboot-bin.git boot_pack/magiskboot
+          chmod +x boot_pack/magiskboot/linux/x86_64/magiskboot
+          MB="./boot_pack/magiskboot/linux/x86_64/magiskboot"
+          
+          # Unpack, replace kernel, and repack
+          $MB unpack stock_boot.img
+          if [ -f "Image" ]; then
+            cp Image kernel
+          elif [ -f "Image.gz" ]; then
+            cp Image.gz kernel
+          fi
+          $MB repack stock_boot.img patched_boot.img
+          echo "boot.img packed successfully."
+        else
+          echo "No stock_boot.img found. Skipping boot.img packing. Please provide stock_boot.img in the repo root if you want this to work."
+        fi
+
     - name: Package with AnyKernel3
       run: |
         git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
         rm -rf AnyKernel3/.git AnyKernel3/README.md
         
         # Copy build artifacts to AnyKernel3
-        if [ -f "Image" ]; then
-          cp Image AnyKernel3/
-        elif [ -f "Image.gz" ]; then
-          cp Image.gz AnyKernel3/
-        fi
-        
-        # Copy all generated DTBOs
+        find . -maxdepth 1 -name "Image*" -exec cp {} AnyKernel3/ \;
         find . -maxdepth 1 -name "*.dtbo" -exec cp {} AnyKernel3/ \;
+        [ -f "patched_boot.img" ] && cp patched_boot.img AnyKernel3/boot.img || true
         
         # Simple configuration for AnyKernel3
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
         sed -i 's/device.name1=maguro/device.name1=a73xq/g' AnyKernel3/anykernel.sh
         
         cd AnyKernel3
-        zip -r ../kernel-a73xq-AnyKernel3.zip *
+        zip -r ../kernel-a73xq-KSU-Next.zip *
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-a73xq-AnyKernel3
-        path: kernel-a73xq-AnyKernel3.zip
+        name: kernel-a73xq-KSU-Next
+        path: kernel-a73xq-KSU-Next.zip
