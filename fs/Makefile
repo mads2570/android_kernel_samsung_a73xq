@@ -140,3 +140,4 @@ obj-$(CONFIG_EROFS_FS)		+= erofs/
 
 ifdef CONFIG_SEC_KUNIT
 endif
+obj-y += susfs.o

@@ -1,0 +1,129 @@
+name: Build Samsung A73xq Kernel
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Source
+      uses: actions/checkout@v4
+
+    - name: Set up Build Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential curl flex git libssl-dev make python3 zip zstd libelf-dev libarchive-tools libarchive-dev
+
+    - name: Download Toolchains
+      run: |
+        mkdir -p toolchain/clang toolchain/gcc64 toolchain/gcc32
+        
+        # Download Clang 11.0.2
+        curl -LSs https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-11.0.0_r48/clang-r383902b.tar.gz -o clang.tar.gz
+        tar -C toolchain/clang -xzf clang.tar.gz
+        
+        # Download AOSP GCC 4.9 (for aarch64)
+        curl -LSs https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-11.0.0_r48.tar.gz -o gcc64.tar.gz
+        tar -C toolchain/gcc64 -xzf gcc64.tar.gz
+        
+        # Download AOSP GCC 4.9 (for arm)
+        curl -LSs https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-11.0.0_r48.tar.gz -o gcc32.tar.gz
+        tar -C toolchain/gcc32 -xzf gcc32.tar.gz
+
+    - name: Debug Toolchain Paths
+      run: |
+        echo "Checking Clang bin:"
+        ls -F toolchain/clang/bin/ | head -n 10
+        echo "Checking GCC64 bin:"
+        ls -F toolchain/gcc64/bin/ | head -n 10
+        echo "Checking GCC32 bin:"
+        ls -F toolchain/gcc32/bin/ | head -n 10
+
+    - name: Fix Permissions
+      run: |
+        # Grant execute permissions to ALL shell and python scripts in the repo
+        find . -path ./.git -prune -o -type f -name "*.sh" -exec chmod +x {} +
+        find . -path ./.git -prune -o -type f -name "*.py" -exec chmod +x {} +
+        chmod +x tools/dtc tools/mkdtimg
+        chmod +x build_kernel.sh
+
+    - name: Fix Symlinks
+      run: |
+        # Recreate essential symlinks for DTS compilation
+        cd scripts/dtc/include-prefixes
+        rm -rf dt-bindings arm64 arm
+        ln -s ../../../include/dt-bindings dt-bindings
+        ln -s ../../../arch/arm64/boot/dts arm64
+        ln -s ../../../arch/arm/boot/dts arm
+        
+        mkdir -p arm
+        cd arm
+        ln -s ../../../../arch/arm/boot/dts msm || true
+        cd ..
+        
+        mkdir -p arm64
+        cd arm64
+        ln -s ../../../../arch/arm64/boot/dts/vendor qcom || true
+        cd ..
+        
+        cd ../../../
+
+    - name: Run Build Script
+      run: |
+        chmod +x build_kernel.sh
+        export PATH="${{ github.workspace }}/toolchain/clang/bin:${{ github.workspace }}/toolchain/gcc64/bin:${{ github.workspace }}/toolchain/gcc32/bin:$PATH"
+        ./build_kernel.sh
+      env:
+        GCC64_DIR: ${{ github.workspace }}/toolchain/gcc64
+        GCC32_DIR: ${{ github.workspace }}/toolchain/gcc32
+        CLANG_DIR: ${{ github.workspace }}/toolchain/clang
+
+    - name: Pack boot.img
+      run: |
+        if [ -f "stock_boot.img" ]; then
+          mkdir -p boot_pack
+          git clone https://github.com/mizunashi/magiskboot-bin.git boot_pack/magiskboot
+          chmod +x boot_pack/magiskboot/linux/x86_64/magiskboot
+          MB="./boot_pack/magiskboot/linux/x86_64/magiskboot"
+          
+          # Unpack, replace kernel, and repack
+          $MB unpack stock_boot.img
+          if [ -f "Image" ]; then
+            cp Image kernel
+          elif [ -f "Image.gz" ]; then
+            cp Image.gz kernel
+          fi
+          $MB repack stock_boot.img patched_boot.img
+          echo "boot.img packed successfully."
+        else
+          echo "No stock_boot.img found. Skipping boot.img packing."
+        fi
+
+    - name: Package with AnyKernel3
+      run: |
+        git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+        rm -rf AnyKernel3/.git AnyKernel3/README.md
+        
+        # Copy build artifacts to AnyKernel3
+        find . -maxdepth 1 -name "Image*" -exec cp {} AnyKernel3/ \;
+        find . -maxdepth 1 -name "*.dtbo" -exec cp {} AnyKernel3/ \;
+        [ -f "patched_boot.img" ] && cp patched_boot.img AnyKernel3/boot.img || true
+        
+        # Simple configuration for AnyKernel3
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+        sed -i 's/device.name1=maguro/device.name1=a73xq/g' AnyKernel3/anykernel.sh
+        
+        cd AnyKernel3
+        zip -r ../kernel-a73xq-KSU-Next.zip *
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-a73xq-KSU-Next
+        path: kernel-a73xq-KSU-Next.zip
