@@ -86,15 +86,29 @@ jobs:
     - name: Integrate ReSukiSU
       run: |
         git clone https://github.com/ReSukiSU/ReSukiSU.git drivers/ReSukiSU
-        # Add to Makefile if not already there
-        grep -q "ReSukiSU" drivers/Makefile || echo "obj-y += ReSukiSU/" >> drivers/Makefile
         
-        # Find the actual Kconfig
-        ACTUAL_KCONFIG=$(find drivers/ReSukiSU -name "Kconfig" | head -n 1)
+        # Dynamically find the source directory containing Makefile and Kconfig
+        # Some forks put it in a 'kernel' or 'drivers' subdirectory
+        KSU_SRC_DIR=$(find drivers/ReSukiSU -name "Makefile" -exec grep -l "obj-y" {} + | xargs dirname | head -n 1)
+        
+        if [ -z "$KSU_SRC_DIR" ]; then
+          echo "Error: Could not find ReSukiSU source directory"
+          exit 1
+        fi
+        
+        echo "Found ReSukiSU source in: $KSU_SRC_DIR"
+        
+        # Add to drivers/Makefile pointing to the detected directory
+        # We need the path relative to drivers/
+        REL_KSU_PATH=${KSU_SRC_DIR#drivers/}
+        grep -q "ReSukiSU" drivers/Makefile || echo "obj-y += $REL_KSU_PATH/" >> drivers/Makefile
+        
+        # Find and link Kconfig
+        ACTUAL_KCONFIG=$(find $KSU_SRC_DIR -name "Kconfig" | head -n 1)
         if [ -n "$ACTUAL_KCONFIG" ]; then
           sed -i "/endmenu/i source \"$ACTUAL_KCONFIG\"" drivers/Kconfig
         else
-          echo "Error: ReSukiSU Kconfig not found"
+          echo "Error: ReSukiSU Kconfig not found in $KSU_SRC_DIR"
           exit 1
         fi
 
