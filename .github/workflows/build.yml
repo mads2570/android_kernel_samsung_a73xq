@@ -56,14 +56,12 @@ jobs:
     - name: Fix Symlinks
       run: |
         # Recreate essential symlinks for DTS compilation
-        # Qualcomm kernels often expect a complex nested structure
         cd scripts/dtc/include-prefixes
         rm -rf dt-bindings arm64 arm
         ln -s ../../../include/dt-bindings dt-bindings
         ln -s ../../../arch/arm64/boot/dts arm64
         ln -s ../../../arch/arm/boot/dts arm
         
-        # Additional symlinks for common Qualcomm patterns
         mkdir -p arm
         cd arm
         ln -s ../../../../arch/arm/boot/dts msm || true
@@ -76,103 +74,6 @@ jobs:
         
         cd ../../../
 
-    - name: Fix Case-Sensitive Headers
-      run: |
-        # (This step is already in the file or added previously, ensuring lowercase headers exist)
-        # I will keep the previous fix here for context if needed, but since I added them to repo, I might skip it.
-        # Actually, let's just proceed to the new integrations.
-        echo "Headers already in repo."
-
-    - name: Integrate ReSukiSU
-      run: |
-        git clone https://github.com/ReSukiSU/ReSukiSU.git drivers/ReSukiSU
-        
-        # Dynamically find the source directory containing Makefile and Kconfig
-        # Some forks put it in a 'kernel' or 'drivers' subdirectory
-        KSU_SRC_DIR=$(find drivers/ReSukiSU -name "Makefile" -exec grep -l "obj-y" {} + | xargs dirname | head -n 1)
-        
-        if [ -z "$KSU_SRC_DIR" ]; then
-          echo "Error: Could not find ReSukiSU source directory"
-          exit 1
-        fi
-        
-        echo "Found ReSukiSU source in: $KSU_SRC_DIR"
-        
-        # Add to drivers/Makefile pointing to the detected directory
-        # We need the path relative to drivers/
-        REL_KSU_PATH=${KSU_SRC_DIR#drivers/}
-        grep -q "ReSukiSU" drivers/Makefile || echo "obj-y += $REL_KSU_PATH/" >> drivers/Makefile
-        
-        # Find and link Kconfig
-        ACTUAL_KCONFIG=$(find $KSU_SRC_DIR -name "Kconfig" | head -n 1)
-        if [ -n "$ACTUAL_KCONFIG" ]; then
-          sed -i "/endmenu/i source \"$ACTUAL_KCONFIG\"" drivers/Kconfig
-        else
-          echo "Error: ReSukiSU Kconfig not found in $KSU_SRC_DIR"
-          exit 1
-        fi
-
-    - name: Integrate SusFS
-      run: |
-        git clone https://gitlab.com/simonpunk/susfs4ksu.git
-        # Apply SusFS patches
-        cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-        cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-        patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch || echo "Patch applied with some offsets/fails"
-        
-        # Patch ReSukiSU for SusFS support
-        cd drivers/ReSukiSU
-        patch -p1 < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || echo "KSU SusFS patch failed"
-        cd ../../
-        
-        # Ensure SusFS is built
-        echo "obj-y += susfs.o" >> fs/Makefile
-        
-        # Fix unused variable warnings in task_mmu.c caused by SusFS patch
-        # Use very aggressive sed to handle any whitespace or formatting
-        sed -i 's/char \*out_name/char * __maybe_unused out_name/g' fs/proc/task_mmu.c || true
-        sed -i 's/int ret = 0/int __maybe_unused ret = 0/g' fs/proc/task_mmu.c || true
-        
-        # Fix C90 mixing declarations and code in base.c caused by SusFS patch
-        # and unused variable 'info'
-        sed -i 's/int susfs_ret = 0/int __maybe_unused susfs_ret = 0/g' fs/proc/base.c || true
-        sed -i 's/struct map_files_info info/struct map_files_info __maybe_unused info/g' fs/proc/base.c || true
-
-    - name: Integrate Baseband-Guard (BBG)
-      run: |
-        git clone https://github.com/vc-teahouse/Baseband-guard.git security/Baseband-guard
-        echo 'obj-$(CONFIG_SECURITY_BBG) += Baseband-guard/baseband_guard.o' >> security/Makefile
-        
-        # Fix BBG missing headers error and force legacy LSM registration for 5.4 kernel
-        echo 'ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include -I$(objtree)/security/selinux -DBBG_USE_DEFINE_LSM=0' >> security/Makefile
-        
-        # Patch baseband_guard.c to wrap extern struct lsm_blob_sizes which doesn't exist in 5.4
-        sed -i 's/extern struct lsm_blob_sizes bbg_blob_sizes;/#ifdef BBG_USE_DEFINE_LSM\nextern struct lsm_blob_sizes bbg_blob_sizes;\n#endif/' security/Baseband-guard/baseband_guard.c
-        
-        # Add Kconfig entry for BBG if not exists
-        if ! grep -q "SECURITY_BBG" security/Kconfig; then
-          sed -i '/menu "Security options"/a config SECURITY_BBG\n\tbool "Baseband-Guard Support"\n\tdefault y\n\thelp\n\t  Protect critical partitions from unauthorized writes.' security/Kconfig
-        fi
-
-    - name: Configure Defconfig
-      run: |
-        DEFCONFIG="arch/arm64/configs/vendor/a73xq_eur_open_defconfig"
-        # ReSukiSU
-        echo "CONFIG_KSU=y" >> $DEFCONFIG
-        # SusFS
-        echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG
-        echo "CONFIG_SUSFS=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS_SUSP_PATH=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUSP_PATH=y" >> $DEFCONFIG
-        echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT=y" >> $DEFCONFIG
-        # BBG
-        echo "CONFIG_SECURITY_BBG=y" >> $DEFCONFIG
-        # TCP BBR
-        echo "CONFIG_TCP_CONG_BBR=y" >> $DEFCONFIG
-        echo "CONFIG_DEFAULT_TCP_CONG=\"bbr\"" >> $DEFCONFIG
-
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
@@ -183,16 +84,30 @@ jobs:
         GCC32_DIR: ${{ github.workspace }}/toolchain/gcc32
         CLANG_DIR: ${{ github.workspace }}/toolchain/clang
 
-    - name: Prepare Artifacts
+    - name: Package with AnyKernel3
       run: |
-        mkdir -p build_output
-        find . -maxdepth 1 -name "Image*" -exec mv {} build_output/ \;
-        find . -maxdepth 1 -name "*.dtbo" -exec mv {} build_output/ \;
-        cd build_output
-        zip -r ../kernel-a73xq.zip *
+        git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+        rm -rf AnyKernel3/.git AnyKernel3/README.md
+        
+        # Copy build artifacts to AnyKernel3
+        if [ -f "Image" ]; then
+          cp Image AnyKernel3/
+        elif [ -f "Image.gz" ]; then
+          cp Image.gz AnyKernel3/
+        fi
+        
+        # Copy all generated DTBOs
+        find . -maxdepth 1 -name "*.dtbo" -exec cp {} AnyKernel3/ \;
+        
+        # Simple configuration for AnyKernel3
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+        sed -i 's/device.name1=maguro/device.name1=a73xq/g' AnyKernel3/anykernel.sh
+        
+        cd AnyKernel3
+        zip -r ../kernel-a73xq-AnyKernel3.zip *
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-a73xq
-        path: kernel-a73xq.zip
+        name: kernel-a73xq-AnyKernel3
+        path: kernel-a73xq-AnyKernel3.zip
