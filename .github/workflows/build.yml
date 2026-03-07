@@ -98,45 +98,72 @@ jobs:
         patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch || echo "Kernel SusFS patch applied with offsets"
         
         # Manual Fix for task_mmu.c Hunk #3
-        # We find 'end = vma->vm_end;' and insert the SusFS logic after it
-        sed -i '/end = vma->vm_end;/a \
-        \n#ifdef CONFIG_KSU_SUSFS_SUS_MAPS\n\tout_name = kmalloc(SUSFS_MAX_LEN_PATHNAME, GFP_KERNEL);\n\tif (!out_name)\n\t\tgoto orig_flow;\n\tret = susfs_sus_maps(ino, end - start, &ino, &dev, &flags, &pgoff, vma, out_name);\norig_flow:\n#endif' fs/proc/task_mmu.c
+        # We use a temp script to avoid complex escaping in YAML
+        cat <<'EOF' > fix_task_mmu.py
+        import os
+        path = 'fs/proc/task_mmu.c'
+        with open(path, 'r') as f:
+            lines = f.readlines()
         
-        # Insert the second part of Hunk #3 before 'if (file)'
-        sed -i '/if (file) {/i \
-        #ifdef CONFIG_KSU_SUSFS_SUS_MAPS\n\tif (ret == 2) {\n\t\tseq_pad(m, " ");\n\t\tseq_puts(m, out_name);\n\t\tseq_putc(m, "\\n");\n\t\tkfree(out_name);\n\t\treturn;\n\t}\n\tkfree(out_name);\n#endif' fs/proc/task_mmu.c
+        new_lines = []
+        for line in lines:
+            new_lines.append(line)
+            if 'end = vma->vm_end;' in line:
+                new_lines.append('\n#ifdef CONFIG_KSU_SUSFS_SUS_MAPS\n')
+                new_lines.append('\tout_name = kmalloc(SUSFS_MAX_LEN_PATHNAME, GFP_KERNEL);\n')
+                new_lines.append('\tif (!out_name)\n')
+                new_lines.append('\t\tgoto orig_flow;\n')
+                new_lines.append('\tret = susfs_sus_maps(ino, end - start, &ino, &dev, &flags, &pgoff, vma, out_name);\n')
+                new_lines.append('orig_flow:\n')
+                new_lines.append('#endif\n')
+        
+        # Part 2: Insert before if (file)
+        final_lines = []
+        for line in new_lines:
+            if 'if (file) {' in line and '#ifdef CONFIG_KSU_SUSFS_SUS_MAPS' not in "".join(final_lines[-10:]):
+                final_lines.append('#ifdef CONFIG_KSU_SUSFS_SUS_MAPS\n')
+                final_lines.append('\tif (ret == 2) {\n')
+                final_lines.append('\t\tseq_pad(m, " ");\n')
+                final_lines.append('\t\tseq_puts(m, out_name);\n')
+                final_lines.append('\t\tseq_putc(m, \'\\n\');\n')
+                final_lines.append('\t\tkfree(out_name);\n')
+                final_lines.append('\t\treturn;\n')
+                final_lines.append('\t}\n')
+                final_lines.append('\tkfree(out_name);\n')
+                final_lines.append('#endif\n')
+            final_lines.append(line)
+            
+        with open(path, 'w') as f:
+            f.writelines(final_lines)
+        EOF
+        python3 fix_task_mmu.py
 
         # Manual Patching of KernelSU Next for SusFS support
         KSU_DIR="KernelSU-Next/kernel"
         
         # 1. Update Kconfig
-        # Remove the previous attempt at Kconfig update if it existed (though it was never pushed)
-        # We just append before the last endmenu
-        sed -i '/config KSU_DEBUG/a \
-        \nmenu "KernelSU - SUSFS"\nconfig KSU_SUSFS\n    bool "KernelSU addon - SUSFS"\n    depends on KSU\n    default y\nconfig KSU_SUSFS_SUS_PATH\n    bool "Enable to hide suspicious path"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SUS_MOUNT\n    bool "Enable to hide suspicious mounts"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SUS_KSTAT\n    bool "Enable to spoof suspicious kstat"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SUS_MAPS\n    bool "Enable to spoof suspicious maps"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_TRY_UMOUNT\n    bool "Enable to use ksu's try_umount"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SPOOF_UNAME\n    bool "Enable to spoof uname"\n    depends on KSU_SUSFS\n    default y\nendmenu' ${KSU_DIR}/Kconfig
+        sed -i '/config KSU_DEBUG/a config KSU_SUSFS\n    bool "KernelSU addon - SUSFS"\n    depends on KSU\n    default y\nconfig KSU_SUSFS_SUS_PATH\n    bool "Enable to hide suspicious path"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SUS_MOUNT\n    bool "Enable to hide suspicious mounts"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SUS_KSTAT\n    bool "Enable to spoof suspicious kstat"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SUS_MAPS\n    bool "Enable to spoof suspicious maps"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_TRY_UMOUNT\n    bool "Enable to use ksu's try_umount"\n    depends on KSU_SUSFS\n    default y\nconfig KSU_SUSFS_SPOOF_UNAME\n    bool "Enable to spoof uname"\n    depends on KSU_SUSFS\n    default y' ${KSU_DIR}/Kconfig
 
         # 2. Update Makefile
         echo 'ifeq ($(shell test -e $(srctree)/fs/susfs.c; echo $$?),0)' >> ${KSU_DIR}/Makefile
         echo 'ccflags-y += -DKSU_SUSFS' >> ${KSU_DIR}/Makefile
         echo 'endif' >> ${KSU_DIR}/Makefile
 
-        # 3. Update ksu.c (Add include and init)
+        # 3. Update ksu.c
         sed -i '1i #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' ${KSU_DIR}/ksu.c
         sed -i '/prepare_creds/i #ifdef CONFIG_KSU_SUSFS\n\tsusfs_init();\n#endif' ${KSU_DIR}/ksu.c
 
         # 4. Update selinux/rules.c
-        # Inject zygote allow rule before mutex_unlock
         sed -i '/mutex_unlock(&ksu_rules);/i #ifdef CONFIG_KSU_SUSFS\n\tksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");\n#endif' ${KSU_DIR}/selinux/rules.c
 
-        # 5. Update supercalls.c (Add SusFS Handlers)
+        # 5. Update supercalls.c
         sed -i '1i #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' ${KSU_DIR}/supercalls.c
-        # Inject handler into ksu_handle_sys_reboot
-        sed -i '/int ksu_handle_sys_reboot/a \    #ifdef CONFIG_KSU_SUSFS\n    if (magic2 == 0x53555346) { /* SUSF */\n        return 0;\n    }\n    #endif' ${KSU_DIR}/supercalls.c
+        sed -i '/int ksu_handle_sys_reboot/a #ifdef CONFIG_KSU_SUSFS\n    if (magic2 == 0x53555346) return 0;\n#endif' ${KSU_DIR}/supercalls.c
 
-        # 6. Ensure SusFS is built in fs/Makefile
+        # 6. Ensure SusFS is built
         grep -q "susfs.o" fs/Makefile || echo "obj-y += susfs.o" >> fs/Makefile
         
-        # 7. Fix variable warnings (now correctly applying to patched files)
+        # 7. Fix variable warnings
         sed -i 's/char \*out_name/char * __maybe_unused out_name/g' fs/proc/task_mmu.c || true
         sed -i 's/int ret = 0/int __maybe_unused ret = 0/g' fs/proc/task_mmu.c || true
         sed -i 's/int susfs_ret = 0/int __maybe_unused susfs_ret = 0/g' fs/proc/base.c || true
