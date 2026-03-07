@@ -81,13 +81,14 @@ jobs:
         # Patch KernelSU Next for 5.4 kernel compatibility
         # 1. TWA_RESUME is not defined in 5.4, use true (notify)
         # 2. Add missing header for put_task_struct
-        # We target KernelSU-Next/kernel/ because drivers/kernelsu is a symlink
+        # 3. filter_count is not in struct seccomp in 5.4 (added in 5.9)
         find KernelSU-Next/kernel/ -name "*.c" -exec sed -i 's/\bTWA_RESUME\b/true/g' {} +
         find KernelSU-Next/kernel/ -name "*.h" -exec sed -i 's/\bTWA_RESUME\b/true/g' {} +
-        
-        # Force include sched/task.h in allowlist.c
         sed -i '1i #include <linux/sched/task.h>' KernelSU-Next/kernel/allowlist.c
         
+        # Wrap filter_count in version check
+        sed -i 's/atomic_set(&current->seccomp.filter_count, 0);/#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)\n    atomic_set(\&current->seccomp.filter_count, 0);\n#endif/' KernelSU-Next/kernel/app_profile.c
+
     - name: Integrate SusFS
       run: |
         git clone https://gitlab.com/simonpunk/susfs4ksu.git
@@ -97,9 +98,9 @@ jobs:
         patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch || echo "Kernel SusFS patch applied with offsets"
         
         # Patch KernelSU Next for SusFS support
-        cd drivers/kernelsu
-        patch -p1 < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || echo "KSU SusFS patch failed"
-        cd ../../
+        cd KernelSU-Next
+        patch -p1 < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || echo "KSU SusFS patch failed but proceeding"
+        cd ..
         
         # Ensure SusFS is built
         grep -q "susfs.o" fs/Makefile || echo "obj-y += susfs.o" >> fs/Makefile
@@ -109,6 +110,12 @@ jobs:
         sed -i 's/int ret = 0/int __maybe_unused ret = 0/g' fs/proc/task_mmu.c || true
         sed -i 's/int susfs_ret = 0/int __maybe_unused susfs_ret = 0/g' fs/proc/base.c || true
         sed -i 's/struct map_files_info info/struct map_files_info __maybe_unused info/g' fs/proc/base.c || true
+        
+        # The SusFS patch for task_mmu.c failed Hunk #3. 
+        # We need to manually add the label skip_proc_fill_cache if it's missing
+        if ! grep -q "skip_proc_fill_cache:" fs/proc/task_mmu.c; then
+          sed -i '/ctx->pos++;/i #ifdef CONFIG_KSU_SUSFS_SUS_MAPS\nskip_proc_fill_cache:\n#endif' fs/proc/task_mmu.c
+        fi
 
     - name: Configure Defconfig
       run: |
