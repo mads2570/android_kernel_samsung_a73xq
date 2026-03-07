@@ -81,7 +81,7 @@ jobs:
         # Patch KernelSU Next for 5.4 kernel compatibility
         # 1. TWA_RESUME is not defined in 5.4, use true (notify)
         # 2. Add missing header for put_task_struct
-        find drivers/kernelsu -name "*.c" -exec sed -i 's/TWA_RESUME/true/g' {} +
+        grep -rl "TWA_RESUME" drivers/kernelsu | xargs sed -i 's/\bTWA_RESUME\b/true/g' || true
         sed -i '1i #include <linux/sched/task.h>' drivers/kernelsu/allowlist.c
         
     - name: Integrate SusFS
